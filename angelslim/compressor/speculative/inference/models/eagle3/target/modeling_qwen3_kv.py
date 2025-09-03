@@ -850,7 +850,6 @@ class Qwen3Model(Qwen3PreTrainedModel):
         else:
             min_dtype = torch.finfo(dtype).min
             if sequence_length == target_length:
-                min_dtype = torch.finfo(dtype).min
                 causal_mask = torch.full(
                     (sequence_length, target_length),
                     fill_value=min_dtype,
