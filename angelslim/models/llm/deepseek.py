@@ -28,6 +28,7 @@ from ...compressor.quant.core import (
 )
 from ...compressor.quant.modules import QDQModule
 from ...utils import print_info
+from ...utils.utils import find_layers
 from ..base_model import BaseLLMModel
 from ..model_factory import SlimModelFactory
 from .modeling_deepseek import (
@@ -52,6 +53,8 @@ class DeepSeek(BaseLLMModel):
         self.block_name = "model.layers"
         self.column_parallel_linear_class = ColumnParallelLinear
         self.row_parallel_linear_class = RowParallelLinear
+        self.observer_layer_classes = [nn.Linear, Linear]
+        torch.set_default_dtype(torch.bfloat16)
 
     def from_pretrained(
         self,
@@ -96,8 +99,9 @@ class DeepSeek(BaseLLMModel):
 
     def get_observer_layers(self):
         names = self.quant_config.quant_algo_info["ignore_layers"]
-        obs_layers = [nn.Linear, Linear]
-        observer_layers_dict = self.find_layers(self.model, layers=obs_layers)
+        observer_layers_dict = find_layers(
+            self.model, layers=self.observer_layer_classes
+        )
         observer_layers_dict = {
             k: v
             for k, v in observer_layers_dict.items()

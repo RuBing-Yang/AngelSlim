@@ -23,6 +23,7 @@ from huggingface_hub import save_torch_state_dict
 from tqdm import tqdm
 
 from .....utils import get_best_device, print_info, set_op_by_name
+from .....utils.utils import find_layers
 from ...core import pseudo_quantize_tensor
 from ...modules.catcher import Catcher
 from ...modules.helper_layer import WQLinearGEMM
@@ -161,9 +162,9 @@ class AWQ:
             if not self.low_memory:
                 outs = outs.to(dev)
                 self.inps = self.inps.to(dev)
-            subset = self._find_layers(layer)
+            subset = find_layers(layer, layers=self.observer_layer_classes)
 
-            if self.model_arch_type in ["qwen3_moe", "hunyuan_v1_moe"]:
+            if self.model_arch_type in ["qwen3_moe", "hunyuan_v1_moe", "deepseek_v3"]:
                 subset = {
                     **subset,
                     "mlp": layer.mlp,
@@ -353,7 +354,7 @@ class AWQ:
 
     def _convert_llm(self):
         for i in tqdm(range(len(self.layers)), desc="AWQ"):
-            subset = self._find_layers(self.layers[i])
+            subset = find_layers(self.layers[i], layers=self.observer_layer_classes)
             self._apply_quant(self.layers[i], subset)
 
     def convert(self):

@@ -15,6 +15,7 @@
 import torch
 from diffusers import FluxPipeline
 
+from ...utils.utils import find_layers
 from ..base_model import BaseDiffusionModel
 from ..model_factory import SlimModelFactory
 
@@ -90,7 +91,55 @@ class FLUX(BaseDiffusionModel):
         ).images[0]
 
     def get_observer_layers(self):
-        pass
+        names = [
+            "attn.to_q",
+            "attn.to_k",
+            "attn.to_v",
+            "norm.linear",
+            "proj_mlp",
+            "proj_out",
+            "attn.add_k_proj",
+            "attn.add_q_proj",
+            "attn.add_v_proj",
+            "attn.to_add_out",
+            "attn.to_out",
+            "to_out.0",
+            "0.proj",
+            "net.0",
+            "net.2",
+            "norm1.linear",
+            "norm1_context.linear",
+        ]
+        self.quant_module = self.model.transformer
+        observer_layers_dict = {}
+        layers_dict = find_layers(self.quant_module, layers=self.observer_layer_classes)
+
+        ignore_layers = self.skip_layer_names()
+        for name, module in layers_dict.items():
+            if self.block_name in name and (
+                name.split(".")[-1] in names
+                or name.split(".")[-2] + "." + name.split(".")[-1] in names
+            ):
+                observer_layers_dict[name] = module
+            else:
+                ignore_layers.append(name)
+        self.quant_config.quant_algo_info["ignore_layers"] = ignore_layers
+
+        return observer_layers_dict
+
+    def get_quant_module(self):
+        """
+        Returns the module that will be quantized.
+        This is typically the main transformer module of the model.
+        """
+        return self.model.transformer
+
+    def get_quant_convert_module(self):
+        """
+        Returns the module that will be converted to quantized.
+        This is typically the main transformer module of the model.
+        """
+        return self.model.transformer
 
     def get_save_func(self):
         pass
