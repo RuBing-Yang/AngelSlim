@@ -190,6 +190,7 @@ class Engine:
             slim_config = {
                 "global_config": global_config,
                 "compress_config": compress_config,
+                "model_path": self.model_path,
             }
         self.compress_type = compress_name
         # Create compressor by CompressorFactory

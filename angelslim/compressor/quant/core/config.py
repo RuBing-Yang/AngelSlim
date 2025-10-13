@@ -61,6 +61,12 @@ class QuantConfig:
         self.quant_helpers = quantization_args.quant_helpers
         act_quant_method = quantization_args.quant_method.get("activation", None)
         weight_quant_method = quantization_args.quant_method["weight"]
+        self.cpu_convert = quantization_args.cpu_convert
+
+        if global_config:
+            self.max_seq_length = global_config.max_seq_length
+            self.hidden_size = global_config.hidden_size
+            self.model_arch_type = global_config.model_arch_type
 
         if "fp8" in self.quant_algo:
             is_dynamic = "dynamic" if "dynamic" in self.quant_algo else "static"
