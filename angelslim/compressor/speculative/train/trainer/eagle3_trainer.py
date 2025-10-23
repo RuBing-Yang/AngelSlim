@@ -13,19 +13,18 @@
 # limitations under the License.
 
 import os
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
+import deepspeed
 import torch
 from torch import nn
 from transformers import Trainer
 
-from angelslim.utils.lazy_imports import deepspeed
-
 from ...utils import padding
 
 
-class Eagle3Trainer(Trainer, ABC):
+class Eagle3Trainer(Trainer):
     """
     EAGLE3 Trainer for speculative decoding training.
 
@@ -218,10 +217,10 @@ class Eagle3Trainer(Trainer, ABC):
         ploss_weight = [0.8**i for i in range(len(plosses))]
         ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
 
-        log = {f"train/acc_{i}": round(float(acces[i]), 3) for i in range(len(acces))}
+        log = {f"train/acc_{i}": f"{acces[i]:.3f}" for i in range(len(acces))}
         log.update(
             {
-                f"train/ploss_{i}": round(float(plosses[i].item()), 3)
+                f"train/ploss_{i}": f"{plosses[i].item():.2f}"
                 for i in range(len(plosses))
             }
         )
@@ -353,3 +352,9 @@ class OnlineEagle3Trainer(Eagle3Trainer):
             "position_ids": position_ids,
             "attention_mask": attention_mask,
         }
+
+
+class OfflineEagle3Trainer(Eagle3Trainer):
+    def prepare_data_for_draft_model(self, inputs):
+        # TODO: Implement offline data preparation
+        pass

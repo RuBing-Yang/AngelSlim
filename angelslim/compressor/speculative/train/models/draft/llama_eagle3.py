@@ -24,7 +24,6 @@ from transformers.activations import ACT2FN
 
 from ..model_utils import apply_rotary_pos_emb, repeat_kv
 from .base_model import Eagle3BaseDraftModel
-from .draft_model_factory import DraftModelFactory
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
@@ -452,8 +451,7 @@ class LlamaDecoderLayeremb(nn.Module):
         return outputs, latest_hidden_cache
 
 
-@DraftModelFactory.register
-class Eagle3LlamaForCausalLM(Eagle3BaseDraftModel):
+class Eagle3LLamaforCausalLM(Eagle3BaseDraftModel):
     config_class = LlamaConfig
 
     def __init__(self, config):
