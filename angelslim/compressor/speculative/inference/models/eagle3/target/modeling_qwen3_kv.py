@@ -31,7 +31,6 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
 from transformers.processing_utils import Unpack
 from transformers.utils import (
-    TransformersKwargs,
     add_code_sample_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
@@ -958,7 +957,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[TransformersKwargs],
+        **kwargs,
     ) -> CausalLMOutputWithPast:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*): # noqa: E501
