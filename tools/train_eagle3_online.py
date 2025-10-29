@@ -10,9 +10,6 @@ from angelslim.compressor.speculative.train.data import (
     DataCollatorWithPadding,
     DatasetManager,
 )
-from angelslim.compressor.speculative.train.data.chat_templates import (
-    get_supported_chat_template_type_strings,
-)
 from angelslim.compressor.speculative.train.models.draft import (
     DraftModelConfig,
     create_draft_model,
@@ -95,15 +92,6 @@ def parse_args():
         type=str,
         default=None,
         help="Path to evaluation data file (JSON format)",
-    )
-    data_group.add_argument(
-        "--chat_template_type",
-        type=str,
-        default="llama",
-        help=(
-            f"Chat template type for conversation formatting. "
-            f"Supported types: {', '.join(get_supported_chat_template_type_strings())}"
-        ),
     )
     data_group.add_argument(
         "--num_proc",
@@ -298,15 +286,11 @@ def train_eagle3_online():
     rank0_print("Draft model loaded successfully")
 
     # Create datasets using DatasetManager
-    rank0_print(
-        "Creating training and evaluation datasets "
-        f"with chat template type: {args.chat_template_type}..."
-    )
+    rank0_print("Creating training and evaluation datasets")
     dataset_manager = DatasetManager(
         data_args=args,
         tokenizer=target_model.tokenizer,
         model_max_length=args.model_max_length,
-        chat_template_type=args.chat_template_type,
     )
     train_dataset, eval_dataset = dataset_manager.create_datasets()
     rank0_print(

@@ -12,19 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from datasets import load_dataset
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
-
-from .chat_templates import (
-    ChatTemplateType,
-    string_to_chat_template_type,
-    template_manager,
-)
 
 
 class DatasetBuilder:
@@ -33,17 +26,10 @@ class DatasetBuilder:
         tokenizer: AutoTokenizer,
         max_length: int = 2048,
         shuffle_seed: int = 42,
-        chat_template_type: ChatTemplateType = ChatTemplateType.QWEN3,
     ):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.shuffle_seed = shuffle_seed
-        self.chat_template_type = chat_template_type
-
-        # Get chat template
-        template = template_manager.get_template_dict(chat_template_type)
-        self.user_header = template["user_header"]
-        self.assistant_header = template["assistant_header"]
 
     def build_dataset(self, datapath: str, num_proc: int = 8) -> Dataset:
         try:
@@ -108,28 +94,33 @@ class DatasetBuilder:
             if not messages:
                 return None
 
-            # Apply chat template
-            conversation = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
+            input_ids_list = []
+            loss_mask_list = []
 
-            # Tokenize conversation
-            encoding = self.tokenizer(
-                conversation,
-                return_offsets_mapping=True,
-                max_length=self.max_length,
-                truncation=True,
-                padding=False,
-            )
+            for message in messages:
+                message_tokens = self.tokenizer.apply_chat_template(
+                    [message],
+                    tokenize=True,
+                    add_generation_prompt=False,
+                    return_tensors="pt",
+                ).squeeze(0)
 
-            input_ids = encoding.input_ids
-            offsets = encoding.offset_mapping
+                # Determine the loss mask based on the role
+                if message["role"] in ["system", "user"]:
+                    mask = torch.zeros_like(message_tokens)
+                else:  # assistant
+                    mask = torch.ones_like(message_tokens)
 
-            # Create loss mask for assistant responses
-            loss_mask = self._create_loss_mask_from_offsets(conversation, offsets)
-            input_ids = torch.tensor(input_ids)
+                input_ids_list.append(message_tokens)
+                loss_mask_list.append(mask)
+
+            input_ids = torch.cat(input_ids_list, dim=0)
+            loss_mask = torch.cat(loss_mask_list, dim=0)
+
+            if len(input_ids) > self.max_length:
+                input_ids = input_ids[: self.max_length]
+                loss_mask = loss_mask[: self.max_length]
+
             attention_mask = torch.ones_like(input_ids)
 
             return {
@@ -142,34 +133,6 @@ class DatasetBuilder:
             # TODO: rank0 print
             print(f"Error processing conversation: {e}")
             return None
-
-    # Copied from https://github.com/NickL77/BaldEagle/blob/master/generate_data/generate_data.py # noqa: E501
-    def _create_loss_mask_from_offsets(
-        self, conversation: str, offsets: torch.Tensor
-    ) -> torch.Tensor:
-        loss_mask = torch.zeros(len(offsets), dtype=torch.long)
-
-        # Find all assistant response spans
-        assistant_pattern = (
-            re.escape(self.assistant_header)
-            + r"(.*?)(?="
-            + re.escape(self.user_header)
-            + "|$)"
-        )
-
-        for match in re.finditer(assistant_pattern, conversation, re.DOTALL):
-            # Get the actual response content (excluding header)
-            response_start = match.start(1)
-            response_end = match.end(1)
-
-            # Mark tokens that overlap with assistant response
-            for idx, (token_start, token_end) in enumerate(offsets):
-
-                # Check if token overlaps with assistant response span
-                if not (token_end <= response_start or token_start > response_end):
-                    loss_mask[idx] = 1
-
-        return loss_mask
 
     def _build_messages(self, source: List[Dict]) -> List[Dict]:
         # System message
@@ -267,7 +230,6 @@ class DatasetManager:
         data_args,
         tokenizer: AutoTokenizer,
         model_max_length: int = 2048,
-        chat_template_type: Optional[Union[str, ChatTemplateType]] = None,
     ):
         """
         Initialize DatasetManager with DataArguments.
@@ -276,29 +238,16 @@ class DatasetManager:
             data_args: DataArguments object from train_eagle3_online.py
             tokenizer: Tokenizer for the model
             model_max_length: Maximum sequence length
-            chat_template_type: Chat template type. Can be:
-                - ChatTemplateType enum value (e.g., ChatTemplateType.QWEN3)
-                - String (e.g., "llama", "qwen")
-                - None (will default to LLAMA)
         """
         self.data_args = data_args
         self.tokenizer = tokenizer
         self.model_max_length = model_max_length
-
-        # Convert chat_template_type to ChatTemplateType enum
-        if chat_template_type is None:
-            # Default to QWEN3
-            chat_template_type = ChatTemplateType.QWEN3
-        elif isinstance(chat_template_type, str):
-            # Convert string to enum
-            chat_template_type = string_to_chat_template_type(chat_template_type)
 
         # Create dataset builder
         self.dataset_builder = DatasetBuilder(
             tokenizer=tokenizer,
             max_length=model_max_length,
             shuffle_seed=data_args.shuffle_seed,
-            chat_template_type=chat_template_type,
         )
 
     def create_datasets(self) -> Tuple[Dataset, Optional[Dataset]]:
