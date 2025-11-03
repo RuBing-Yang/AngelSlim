@@ -451,7 +451,7 @@ class LlamaDecoderLayeremb(nn.Module):
         return outputs, latest_hidden_cache
 
 
-class Eagle3LLamaforCausalLM(Eagle3BaseDraftModel):
+class Eagle3LlamaForCausalLM(Eagle3BaseDraftModel):
     config_class = LlamaConfig
 
     def __init__(self, config):
