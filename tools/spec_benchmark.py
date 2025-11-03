@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--depth", type=int, default=5, help="Tree depth")
     parser.add_argument("--top-k", type=int, default=10, help="Top-k sampling")
-    parser.add_argument("--top-p", type=int, default=1.0, help="Top-p sampling")
+    parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
 
     # Hardware configuration
     parser.add_argument(
