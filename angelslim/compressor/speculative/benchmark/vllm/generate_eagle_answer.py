@@ -101,7 +101,7 @@ class EvaluationConfig:
         current_file = os.path.abspath(__file__)
         project_root = current_file.split("/AngelSlim/")[0] + "/AngelSlim"
         answer_file = os.path.join(
-            project_root, "output", args.bench_name, {self.model_id}, ".jsonl"
+            project_root, "output", args.bench_name, self.model_id, ".jsonl"
         )
         print(f"Answer file path: {answer_file}")
         return answer_file
