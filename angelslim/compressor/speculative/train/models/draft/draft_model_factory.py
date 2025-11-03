@@ -19,7 +19,7 @@ from typing import Any, Dict, Union
 import torch
 from transformers import AutoConfig, PretrainedConfig, PreTrainedModel
 
-from .llama_eagle3 import Eagle3LLamaforCausalLM
+from .llama_eagle3 import Eagle3LlamaForCausalLM
 
 
 class DraftModelFactory:
@@ -31,7 +31,7 @@ class DraftModelFactory:
     """
 
     _ARCHITECTURE_MAPPING = {
-        "Eagle3LLamaforCausalLM": Eagle3LLamaforCausalLM,
+        "Eagle3LlamaForCausalLM": Eagle3LlamaForCausalLM,
     }
 
     @classmethod
@@ -67,7 +67,7 @@ class DraftModelFactory:
             Loaded model instance
 
         Example:
-            >>> # Load Eagle3 model (architectures=["Eagle3LLamaforCausalLM"])
+            >>> # Load Eagle3 model (architectures=["Eagle3LlamaForCausalLM"])
             >>> model = DraftModelFactory.from_pretrained("/path/to/eagle3/model")
         """
         # Load config
@@ -104,7 +104,7 @@ class DraftModelFactory:
 
 class DraftModelConfig:
     _ARCHITECTURE_MAPPING = {
-        "Eagle3LLamaforCausalLM": Eagle3LLamaforCausalLM,
+        "Eagle3LlamaForCausalLM": Eagle3LlamaForCausalLM,
     }
 
     @classmethod
