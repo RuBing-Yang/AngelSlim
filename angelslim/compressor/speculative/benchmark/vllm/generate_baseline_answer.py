@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import random
 import time
@@ -26,9 +27,7 @@ import torch
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from angelslim.utils.lazy_imports import fastchat
-from angelslim.utils.lazy_imports import multiprocessing as mp
-from angelslim.utils.lazy_imports import shortuuid, vllm
+from angelslim.utils.lazy_imports import fastchat, shortuuid, vllm
 
 SYSTEM_PROMPT = {
     "role": "system",

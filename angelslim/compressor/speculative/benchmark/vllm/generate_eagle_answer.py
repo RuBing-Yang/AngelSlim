@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import random
 import time
@@ -234,7 +235,7 @@ def get_model_answers(
     num_choices: int,
     temperature: float,
     args: argparse.Namespace,
-    lock=None,
+    lock: Optional[mp.Lock] = None,
     results_list: Optional[List] = None,
     device_list: Optional[List] = None,
 ) -> float | None:

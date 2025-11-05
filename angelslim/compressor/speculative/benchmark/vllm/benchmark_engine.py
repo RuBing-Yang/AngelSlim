@@ -14,13 +14,13 @@
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
 from angelslim.utils.lazy_imports import fastchat
-from angelslim.utils.lazy_imports import multiprocessing as mp
 
 from .generate_baseline_answer import get_model_answers as get_baseline_answers
 from .generate_eagle_answer import get_model_answers as get_eagle_answers

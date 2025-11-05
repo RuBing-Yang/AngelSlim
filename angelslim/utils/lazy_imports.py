@@ -203,7 +203,6 @@ referencing = LazyModule("referencing", "speculative")
 deepspeed = LazyModule("deepspeed", "speculative")
 vllm = LazyModule("vllm", "speculative")
 shortuuid = LazyModule("shortuuid", "speculative")
-multiprocessing = LazyModule("multiprocessing")
 
 
 # --- multimodal related lazy imports ---
