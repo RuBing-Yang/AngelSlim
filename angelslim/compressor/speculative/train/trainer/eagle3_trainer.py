@@ -78,6 +78,7 @@ class Eagle3Trainer(Trainer, ABC):
         target_logits = data_for_draft_model["target_logits"]
         loss_mask = data_for_draft_model["loss_mask"]
         hidden_states = data_for_draft_model["hidden_states"]
+        inputs_embeds = data_for_draft_model["input_embeds"]
 
         hidden_states = self.down_project_hidden_states(hidden_states)
         attention_mask, position_ids = self.prepare_attention_mask_and_position_ids(
@@ -90,6 +91,7 @@ class Eagle3Trainer(Trainer, ABC):
             position_ids,
             target_logits,
             loss_mask,
+            inputs_embeds,
         )
 
         return loss
@@ -151,6 +153,7 @@ class Eagle3Trainer(Trainer, ABC):
         position_ids,
         target_logits,
         loss_mask,
+        inputs_embeds,
     ):
         _, seq_length, _ = hidden_states.shape
 
@@ -161,7 +164,8 @@ class Eagle3Trainer(Trainer, ABC):
         # Step 7: Iterative speculative decoding training loop
         for idx in range(self.length):
             # Step 7.1: Get input embeddings with gradient tracking
-            inputs_embeds = self.draft_model.get_input_embeddings(input_ids)
+            if inputs_embeds is None:
+                inputs_embeds = self.draft_model.get_input_embeddings(input_ids)
             if not inputs_embeds.requires_grad:
                 inputs_embeds.requires_grad = True
 
@@ -334,10 +338,12 @@ class OnlineEagle3Trainer(Eagle3Trainer):
         position_ids = inputs.get("position_ids", None)
 
         # Step 2: Get hidden states and logits from target model
-        hidden_states, target_logits = self.target_model.get_hidden_states_and_logits(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            aux_hidden_states_layer_ids=self._aux_hidden_states_layer_ids,
+        hidden_states, target_logits, input_embeds = (
+            self.target_model.get_hidden_states_and_logits(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                aux_hidden_states_layer_ids=self._aux_hidden_states_layer_ids,
+            )
         )
 
         # Step 3: Apply right padding and move tensors to correct device
@@ -349,6 +355,7 @@ class OnlineEagle3Trainer(Eagle3Trainer):
             "hidden_states": hidden_states,
             "target_logits": target_logits,
             "input_ids": input_ids,
+            "input_embeds": input_embeds,
             "loss_mask": loss_mask,
             "position_ids": position_ids,
             "attention_mask": attention_mask,

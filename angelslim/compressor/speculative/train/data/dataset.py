@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from datasets import load_dataset
 from torch.utils.data import Dataset
-from transformers import AutoTokenizer
+from transformers import AutoProcessor, AutoTokenizer
 
 from angelslim.utils import rank0_print
 
@@ -32,7 +32,7 @@ from .chat_templates import (
 class DatasetBuilder:
     def __init__(
         self,
-        tokenizer: AutoTokenizer,
+        tokenizer: Union[AutoTokenizer, AutoProcessor],
         max_length: int = 2048,
         shuffle_seed: int = 42,
         chat_template_type: ChatTemplateType = ChatTemplateType.QWEN3,
@@ -93,7 +93,7 @@ class DatasetBuilder:
         rank0_print("-" * 80)
 
         decoded_tokens = []
-        for token_id, mask_value in zip(input_ids, loss_mask):
+        for token_id, mask_value in zip(input_ids.view(-1), loss_mask):
             token_text = self.tokenizer.decode([token_id], skip_special_tokens=False)
 
             # Choose color based on mask value
@@ -177,39 +177,75 @@ class DatasetBuilder:
                 return None
 
             # Apply chat template
-            conversation = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
+            assert isinstance(
+                messages, list
+            ), f"type(messages)={type(messages)} is not list"
+            for message in messages:
+                if isinstance(message["content"], str):
+                    continue
+                assert isinstance(
+                    message["content"], list
+                ), f"content={type(message['content'])} is not str or list"
+                new_content = []
+                for item in message["content"]:
+                    new_item = {"type": item["type"], item["type"]: item[item["type"]]}
+                    new_content.append(new_item)
+                del message["content"]
+                message["content"] = new_content
 
-            # Tokenize conversation
-            encoding = self.tokenizer(
-                conversation,
+            encoding = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=False,
+                return_dict=True,
+                return_tensors="pt",
                 return_offsets_mapping=True,
                 max_length=self.max_length,
                 truncation=True,
                 padding=False,
             )
 
-            input_ids = encoding.input_ids
-            offsets = encoding.offset_mapping
+            input_ids = encoding["input_ids"]
+            offsets = encoding["offset_mapping"]
+
+            conversation = self.tokenizer.decode(
+                input_ids[0], skip_special_tokens=False
+            )
 
             # Create loss mask for assistant responses
-            loss_mask = self._create_loss_mask_from_offsets(conversation, offsets)
-            input_ids = torch.tensor(input_ids)
+            try:
+                loss_mask = self._create_loss_mask_from_offsets(conversation, offsets)
+            except Exception as e:
+                rank0_print(f"Error creating loss mask: {e}")
+                rank0_print(f"offsets: {offsets}")
+                raise e
+            # input_ids = torch.tensor(input_ids)
             attention_mask = torch.ones_like(input_ids)
 
             # Visualize loss mask if display mode is enabled
             if self.display and self.display_count == 0:
-                self._visualize_loss_mask(input_ids, loss_mask, conversation)
+                try:
+                    self._visualize_loss_mask(input_ids, loss_mask, conversation)
+                except Exception as e:
+                    rank0_print(f"Error visualizing loss mask: {e}")
+                    rank0_print(f"input_ids: {input_ids}, loss_mask: {loss_mask}")
+                    raise e
                 self.display_count += 1
 
-            return {
-                "input_ids": input_ids[None, :],
-                "attention_mask": attention_mask[None, :],
-                "loss_mask": loss_mask[None, :],
+            res_kwargs = {
+                "input_ids": input_ids.view(1, -1),
+                "attention_mask": attention_mask.view(1, -1),
+                "loss_mask": loss_mask.view(1, -1),
             }
+
+            if "pixel_values" in encoding:
+                res_kwargs["pixel_values"] = encoding["pixel_values"]
+            if "image_grid_thw" in encoding:
+                res_kwargs["image_grid_thw"] = encoding["image_grid_thw"]
+            if "video_pixel_values" in encoding:
+                res_kwargs["video_pixel_values"] = encoding["video_pixel_values"]
+
+            return res_kwargs
 
         except Exception as e:
             rank0_print(f"Error processing conversation: {e}")
@@ -219,6 +255,8 @@ class DatasetBuilder:
     def _create_loss_mask_from_offsets(
         self, conversation: str, offsets: torch.Tensor
     ) -> torch.Tensor:
+        if offsets.ndim == 3:
+            offsets = offsets[0]
         loss_mask = torch.zeros(len(offsets), dtype=torch.long)
 
         # Find all assistant response spans
@@ -265,12 +303,16 @@ class DatasetBuilder:
                 not isinstance(turn, dict)
                 or "role" not in turn
                 or "content" not in turn
+                or not turn["content"]
             ):
                 continue
 
             role = turn["role"]
-            if role and turn["content"].strip():
-                valid_turns.append({"role": role, "content": turn["content"].strip()})
+            if isinstance(turn["content"], str):
+                turn["content"] = turn["content"].strip()
+
+            if role and turn["content"]:
+                valid_turns.append({"role": role, "content": turn["content"]})
 
         # Validate alternating pattern
         for i, turn in enumerate(valid_turns):
@@ -285,7 +327,6 @@ class DatasetBuilder:
 class DataCollatorWithPadding:
     def paddingtensor(self, intensors, N):
         B, n, S = intensors.shape
-        # padding_tensor = torch.zeros(B, N - n, S,dtype=intensors.dtype)
         padding_tensor = torch.zeros(B, N - n, S, dtype=intensors.dtype)
         outtensors = torch.cat((intensors, padding_tensor), dim=1)
         return outtensors
@@ -330,7 +371,8 @@ class DatasetManager:
     def __init__(
         self,
         data_args,
-        tokenizer: AutoTokenizer,
+        modal_type: str,
+        tokenizer: Union[AutoTokenizer, AutoProcessor],
         model_max_length: int = 2048,
         chat_template_type: Optional[Union[str, ChatTemplateType]] = None,
         display: bool = False,
@@ -349,6 +391,7 @@ class DatasetManager:
             display: Whether to display loss mask visualization for the first sample
         """
         self.data_args = data_args
+        self.modal_type = modal_type
         self.tokenizer = tokenizer
         self.model_max_length = model_max_length
         self.display = display
@@ -394,5 +437,7 @@ class DatasetManager:
             eval_dataset = self.dataset_builder.build_dataset(
                 self.data_args.eval_data_path, num_proc=num_proc
             )
+
+        rank0_print(f"Train dataset size: {len(train_dataset)} samples")
 
         return train_dataset, eval_dataset

@@ -24,6 +24,13 @@ def parse_args():
     # Model arguments
     model_group = parser.add_argument_group("Model Arguments")
     model_group.add_argument(
+        "--modal_type",
+        type=str,
+        default="LLM",
+        choices=["LLM", "VLM"],
+        help="Modal type: LLM for language models, VLM for vision-language models",
+    )
+    model_group.add_argument(
         "--target_model_name_or_path",
         type=str,
         default=None,
@@ -233,6 +240,7 @@ def train():
     target_model = create_target_model(
         backend=args.target_backend,
         model_path=args.target_model_name_or_path,
+        modal_type=args.modal_type,
         torch_dtype=torch_dtype,
         trust_remote_code=args.trust_remote_code,
     )
@@ -241,6 +249,7 @@ def train():
     # Create draft model
     rank0_print("Loading draft model...")
     draft_model_config = DraftModelConfig.from_file(args.draft_model_config_path)
+    print(f"draft_model_config: {draft_model_config}")
     draft_model = create_draft_model(draft_model_config)
     draft_model.load_embed_weights(args.target_model_name_or_path)
     draft_model.freeze_embed_weights()
@@ -253,6 +262,7 @@ def train():
     )
     dataset_manager = DatasetManager(
         data_args=args,
+        modal_type=args.modal_type,
         tokenizer=target_model.tokenizer,
         model_max_length=args.model_max_length,
         chat_template_type=args.chat_template_type,

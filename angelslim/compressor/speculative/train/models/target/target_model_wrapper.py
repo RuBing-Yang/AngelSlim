@@ -21,8 +21,9 @@ import torch
 class BaseBackend(ABC):
     """Base class for model backends"""
 
-    def __init__(self, model_path: str, **kwargs):
+    def __init__(self, model_path: str, modal_type: str = "LLM", **kwargs):
         self.model_path = model_path
+        self.modal_type = modal_type
         self.kwargs = kwargs
         self.model = None
         self.tokenizer = None
@@ -38,7 +39,7 @@ class BaseBackend(ABC):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Get hidden states and logits from model"""
         pass
 
@@ -47,7 +48,6 @@ class TransformersBackend(BaseBackend):
     """HuggingFace Transformers backend"""
 
     def load_model(self):
-        from transformers import AutoModelForCausalLM, AutoTokenizer
 
         default_kwargs = {
             "dtype": torch.bfloat16,
@@ -56,16 +56,25 @@ class TransformersBackend(BaseBackend):
         }
         default_kwargs.update(self.kwargs)
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_path, **default_kwargs
-        )
+        if self.modal_type == "LLM":
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            model_class = AutoModelForCausalLM
+            tokenize_class = AutoTokenizer
+        elif self.modal_type == "VLM":
+            from transformers import AutoModelForImageTextToText, AutoProcessor
+
+            model_class = AutoModelForImageTextToText
+            tokenize_class = AutoProcessor
+
+        self.model = model_class.from_pretrained(self.model_path, **default_kwargs)
 
         # Freeze the base model
         for param in self.model.parameters():
             param.requires_grad = False
-
         self.model.eval()
-        self.tokenizer = AutoTokenizer.from_pretrained(
+
+        self.tokenizer = tokenize_class.from_pretrained(
             self.model_path, trust_remote_code=True
         )
 
@@ -74,11 +83,29 @@ class TransformersBackend(BaseBackend):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+
+        inputs_embeds = None
+        if self.modal_type == "VLM":
+            inputs_embeds_list = []
+
+            def hook(module, args, kwargs):
+                if "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
+                    inputs_embeds_list.append(kwargs["inputs_embeds"].clone().detach())
+                return args, kwargs
+
+            handle = self.model.model.language_model.register_forward_pre_hook(
+                hook, with_kwargs=True
+            )
+
         with torch.no_grad():
             outputs = self.model(
                 input_ids, attention_mask, output_hidden_states=True, output_logits=True
             )
+
+        if self.modal_type == "VLM":
+            handle.remove()
+            inputs_embeds = inputs_embeds_list[0]
 
         aux_hidden_states_layer_ids = kwargs.get("aux_hidden_states_layer_ids", None)
         if aux_hidden_states_layer_ids is None:
@@ -104,7 +131,8 @@ class TransformersBackend(BaseBackend):
         )
 
         target = outputs.logits
-        return hidden_states, target.to(input_ids.device)
+        device = input_ids.device
+        return hidden_states, target.to(device), inputs_embeds.to(device)
 
 
 class TargetModelWrapper:
@@ -143,7 +171,7 @@ class TargetModelWrapper:
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Get hidden states and logits from target model
 
