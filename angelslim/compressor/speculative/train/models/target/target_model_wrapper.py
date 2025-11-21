@@ -44,6 +44,22 @@ class BaseBackend(ABC):
         pass
 
 
+class VLMForwardWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, *args, **kwargs):
+        inputs_embeds = None
+        if "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
+            inputs_embeds = kwargs["inputs_embeds"]
+        elif len(args) > 2 and args[2] is not None:
+            inputs_embeds = args[2]
+
+        outputs = self.model.forward(*args, **kwargs)
+        return outputs, inputs_embeds
+
+
 class TransformersBackend(BaseBackend):
     """HuggingFace Transformers backend"""
 
@@ -69,6 +85,9 @@ class TransformersBackend(BaseBackend):
 
         self.model = model_class.from_pretrained(self.model_path, **default_kwargs)
 
+        if self.modal_type == "VLM":
+            self.model = VLMForwardWrapper(self.model)
+
         # Freeze the base model
         for param in self.model.parameters():
             param.requires_grad = False
@@ -86,26 +105,21 @@ class TransformersBackend(BaseBackend):
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
 
         inputs_embeds = None
-        if self.modal_type == "VLM":
-            inputs_embeds_list = []
-
-            def hook(module, args, kwargs):
-                if "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
-                    inputs_embeds_list.append(kwargs["inputs_embeds"].clone().detach())
-                return args, kwargs
-
-            handle = self.model.model.language_model.register_forward_pre_hook(
-                hook, with_kwargs=True
-            )
-
         with torch.no_grad():
-            outputs = self.model(
-                input_ids, attention_mask, output_hidden_states=True, output_logits=True
-            )
-
-        if self.modal_type == "VLM":
-            handle.remove()
-            inputs_embeds = inputs_embeds_list[0]
+            if self.modal_type == "VLM":
+                outputs, inputs_embeds = self.model(
+                    input_ids,
+                    attention_mask,
+                    output_hidden_states=True,
+                    output_logits=True,
+                )
+            else:
+                outputs = self.model(
+                    input_ids,
+                    attention_mask,
+                    output_hidden_states=True,
+                    output_logits=True,
+                )
 
         aux_hidden_states_layer_ids = kwargs.get("aux_hidden_states_layer_ids", None)
         if aux_hidden_states_layer_ids is None:
@@ -132,7 +146,9 @@ class TransformersBackend(BaseBackend):
 
         target = outputs.logits
         device = input_ids.device
-        return hidden_states, target.to(device), inputs_embeds.to(device)
+        if inputs_embeds is not None:
+            return hidden_states, target.to(device), inputs_embeds.to(device)
+        return hidden_states, target.to(device), None
 
 
 class TargetModelWrapper:

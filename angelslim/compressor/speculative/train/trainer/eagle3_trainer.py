@@ -22,8 +22,6 @@ from transformers import Trainer
 
 from angelslim.utils.lazy_imports import deepspeed
 
-from ...utils import padding
-
 
 class Eagle3Trainer(Trainer, ABC):
     """
@@ -35,7 +33,7 @@ class Eagle3Trainer(Trainer, ABC):
 
     def __init__(self, draft_model: nn.Module, length: int, **kwargs):
         """
-        Initialize the OnlineEagle3Trainer.
+        Initialize the Eagle3Trainer.
 
         Args:
             draft_model: Draft model for token prediction
@@ -50,6 +48,7 @@ class Eagle3Trainer(Trainer, ABC):
         """Get the draft model."""
         return self.model
 
+    @abstractmethod
     def compute_loss(
         self,
         model: nn.Module,
@@ -70,35 +69,15 @@ class Eagle3Trainer(Trainer, ABC):
         Returns:
             Tuple of (prediction_losses, value_losses, accuracies) for each step
         """
-        data_for_draft_model = self.prepare_data_for_draft_model(inputs)
-
-        attention_mask = data_for_draft_model["attention_mask"]
-        position_ids = data_for_draft_model["position_ids"]
-        input_ids = data_for_draft_model["input_ids"]
-        target_logits = data_for_draft_model["target_logits"]
-        loss_mask = data_for_draft_model["loss_mask"]
-        hidden_states = data_for_draft_model["hidden_states"]
-        inputs_embeds = data_for_draft_model["input_embeds"]
-
-        hidden_states = self.down_project_hidden_states(hidden_states)
-        attention_mask, position_ids = self.prepare_attention_mask_and_position_ids(
-            hidden_states, attention_mask, position_ids
-        )
-        loss = self.draft_model_training_time_test(
-            input_ids,
-            hidden_states,
-            attention_mask,
-            position_ids,
-            target_logits,
-            loss_mask,
-            inputs_embeds,
-        )
-
-        return loss
+        pass
 
     @abstractmethod
     def prepare_data_for_draft_model(
-        self, inputs: Dict[str, torch.Tensor]
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        loss_mask: torch.Tensor,
+        **kwargs: Any
     ) -> Dict[str, torch.Tensor]:
         """
         Prepare data for draft model training.
@@ -109,7 +88,7 @@ class Eagle3Trainer(Trainer, ABC):
         """
         Down project hidden states for draft model training.
         """
-        # Step 4: Prepare hidden states with gradient tracking
+        # Prepare hidden states with gradient tracking
         if not hidden_states.requires_grad:
             hidden_states.requires_grad = True
         hidden_states = self.draft_model.combine_hidden_states(hidden_states)
@@ -119,12 +98,12 @@ class Eagle3Trainer(Trainer, ABC):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        position_ids: torch.Tensor,
+        position_ids: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Prepare attention mask for draft model training.
         """
-        # Step 5: Prepare attention mask and position IDs
+        # Prepare attention mask and position IDs
         batch_size, seq_length, _ = hidden_states.shape
         device = hidden_states.device
 
@@ -145,6 +124,7 @@ class Eagle3Trainer(Trainer, ABC):
 
         return attention_mask, position_ids
 
+    @abstractmethod
     def draft_model_training_time_test(
         self,
         input_ids,
@@ -153,86 +133,8 @@ class Eagle3Trainer(Trainer, ABC):
         position_ids,
         target_logits,
         loss_mask,
-        inputs_embeds,
     ):
-        _, seq_length, _ = hidden_states.shape
-
-        # Step 6: Initialize containers for losses, accuracies and cache
-        plosses, acces = [], []
-        cache_hidden = [[], []]
-
-        # Step 7: Iterative speculative decoding training loop
-        for idx in range(self.length):
-            # Step 7.1: Get input embeddings with gradient tracking
-            if inputs_embeds is None:
-                inputs_embeds = self.draft_model.get_input_embeddings(input_ids)
-            if not inputs_embeds.requires_grad:
-                inputs_embeds.requires_grad = True
-
-            # Step 7.2: Encode through draft model layers
-            hidden_states = self.draft_model.encode_layers(
-                inputs_embeds=inputs_embeds,
-                hidden_states=hidden_states,
-                cache_hidden=cache_hidden,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                use_cache=True,
-            )
-
-            # Step 7.3: Compute logits from hidden states
-            logits = self.draft_model.compute_logits(hidden_states)
-
-            # Step 7.4: Compute target distribution and position mask
-            with torch.no_grad():
-                target_max_token = target_logits.argmax(-1)
-                target_mask = self.draft_model.t2d[target_max_token][..., None].int()
-                position_mask = target_mask * loss_mask
-
-                target_head = target_logits[..., self.draft_model.t2d].float()
-                target_p = nn.Softmax(dim=2)(target_head).detach()
-
-            # Step 7.5: Compute loss
-            out_logp = nn.LogSoftmax(dim=2)(logits)
-            loss = -torch.sum(position_mask * target_p * out_logp, dim=2).mean()
-
-            # Step 7.6: Compute accuracy
-            with torch.no_grad():
-                correct = (
-                    logits.argmax(-1) == target_p.argmax(-1)
-                ) * position_mask.squeeze(-1)
-                accuracy = correct.sum().item() / (loss_mask.sum().item() + 1e-6)
-
-            # Step 7.7: Store loss and accuracy
-            plosses.append(loss)
-            acces.append(accuracy)
-
-            # Step 7.8: Update inputs for next iteration (skip on last step)
-            if idx < self.length - 1:
-                input_ids = padding(input_ids, left=False)
-                target_logits = padding(target_logits, left=False)
-                loss_mask = padding(loss_mask, left=False)
-
-                # Update attention mask to prevent attending to future positions
-                ind = torch.arange(seq_length, device=attention_mask.device)
-                attention_mask[:, :, ind[idx:], ind[: seq_length - idx]] = torch.finfo(
-                    attention_mask.dtype
-                ).min
-
-        # Step 8: Compute weighted loss
-        ploss_weight = [0.8**i for i in range(len(plosses))]
-        ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
-
-        log = {f"train/acc_{i}": round(float(acces[i]), 3) for i in range(len(acces))}
-        log.update(
-            {
-                f"train/ploss_{i}": round(float(plosses[i].item()), 3)
-                for i in range(len(plosses))
-            }
-        )
-        self.log(log)
-
-        # Step 9: Return loss
-        return ploss
+        pass
 
     def save_model(
         self, output_dir: Optional[str] = None, _internal_call: bool = False
@@ -296,67 +198,3 @@ class Eagle3Trainer(Trainer, ABC):
 
         # Wait for all processes
         self.accelerator.wait_for_everyone()
-
-
-class OnlineEagle3Trainer(Eagle3Trainer):
-    """
-    Online EAGLE3 Trainer for speculative decoding training.
-
-    Implements training logic for EAGLE3 model using a draft model to predict
-    tokens based on hidden states from a target model.
-    """
-
-    def __init__(
-        self,
-        draft_model: nn.Module,
-        target_model: nn.Module,
-        length: int,
-        draft_model_config: Dict[str, Any],
-        **kwargs,
-    ):
-        """
-        Initialize the OnlineEagle3Trainer.
-
-        Args:
-            draft_model: Draft model for token prediction
-            target_model: Target model for generating hidden states
-            length: Number of speculative decoding steps
-            draft_model_config: Configuration dictionary for draft model
-            **kwargs: Additional arguments passed to parent Trainer
-        """
-        super().__init__(draft_model=draft_model, length=length, **kwargs)
-        self.target_model = target_model
-        self._aux_hidden_states_layer_ids = getattr(
-            draft_model_config, "aux_hidden_states_layer_ids", None
-        )
-
-    def prepare_data_for_draft_model(self, inputs):
-        # Step 1: Extract input tensors
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
-        loss_mask = inputs["loss_mask"]
-        position_ids = inputs.get("position_ids", None)
-
-        # Step 2: Get hidden states and logits from target model
-        hidden_states, target_logits, input_embeds = (
-            self.target_model.get_hidden_states_and_logits(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                aux_hidden_states_layer_ids=self._aux_hidden_states_layer_ids,
-            )
-        )
-
-        # Step 3: Apply right padding and move tensors to correct device
-        target_logits = padding(target_logits, left=False).to(input_ids.device)
-        input_ids = padding(input_ids, left=False)
-        loss_mask = loss_mask[..., None].to(input_ids.device)
-
-        return {
-            "hidden_states": hidden_states,
-            "target_logits": target_logits,
-            "input_ids": input_ids,
-            "input_embeds": input_embeds,
-            "loss_mask": loss_mask,
-            "position_ids": position_ids,
-            "attention_mask": attention_mask,
-        }

@@ -6,10 +6,9 @@ import torch
 import transformers
 
 from angelslim.compressor.speculative import (
-    DataCollatorWithPadding,
     DatasetManager,
     DraftModelConfig,
-    OnlineEagle3Trainer,
+    Eagle3TrainerFactory,
     create_draft_model,
     create_target_model,
     get_supported_chat_template_type_strings,
@@ -29,6 +28,13 @@ def parse_args():
         default="LLM",
         choices=["LLM", "VLM"],
         help="Modal type: LLM for language models, VLM for vision-language models",
+    )
+    model_group.add_argument(
+        "--training_mode",
+        type=str,
+        default="online",
+        choices=["online", "offline"],
+        help="Training mode: online or offline",
     )
     model_group.add_argument(
         "--target_model_name_or_path",
@@ -92,6 +98,12 @@ def parse_args():
         type=int,
         default=16,
         help="Number of processes for data preprocessing",
+    )
+    data_group.add_argument(
+        "--sample_num",
+        type=int,
+        default=None,
+        help="Number of max samples for data preprocessing",
     )
     data_group.add_argument(
         "--shuffle_seed", type=int, default=42, help="Random seed for shuffling dataset"
@@ -268,7 +280,7 @@ def train():
         chat_template_type=args.chat_template_type,
         display=args.display,
     )
-    train_dataset, eval_dataset = dataset_manager.create_datasets()
+    train_dataset, eval_dataset, data_collator = dataset_manager.create_datasets()
     rank0_print(
         f"Train dataset size: {len(train_dataset)}, "
         f"Eval dataset size: {len(eval_dataset) if eval_dataset else 0}"
@@ -294,6 +306,7 @@ def train():
         "per_device_train_batch_size": args.per_device_train_batch_size,
         "per_device_eval_batch_size": args.per_device_eval_batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "remove_unused_columns": False,
     }
 
     optimizer_args = {
@@ -338,7 +351,9 @@ def train():
 
     # Initialize trainer
     rank0_print("Initializing trainer...")
-    trainer = OnlineEagle3Trainer(
+    trainer = Eagle3TrainerFactory.create(
+        training_mode=args.training_mode,
+        modal_type=args.modal_type,
         draft_model=draft_model,
         target_model=target_model,
         length=args.training_time_test_length,
@@ -346,7 +361,7 @@ def train():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        data_collator=DataCollatorWithPadding(),
+        data_collator=data_collator,
     )
 
     # Start training
