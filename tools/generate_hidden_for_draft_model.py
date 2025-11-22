@@ -236,6 +236,20 @@ def parse_arguments() -> argparse.Namespace:
         help="Backend for target model",
     )
     parser.add_argument(
+        "--modal_type",
+        type=str,
+        default="LLM",
+        choices=["LLM", "VLM"],
+        help="Modal type: LLM for language models, VLM for vision-language models",
+    )
+    parser.add_argument(
+        "--training_mode",
+        type=str,
+        default="offline",
+        choices=["online", "offline"],
+        help="Training mode: online or offline",
+    )
+    parser.add_argument(
         "--torch_dtype",
         type=str,
         default="bfloat16",
@@ -268,6 +282,12 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=16,
         help="Number of processes for data preprocessing",
+    )
+    parser.add_argument(
+        "--sample_num",
+        type=int,
+        default=None,
+        help="Number of max samples for data preprocessing",
     )
     parser.add_argument(
         "--shuffle_seed", type=int, default=42, help="Random seed for shuffling dataset"
@@ -321,7 +341,7 @@ def load_dataset(args: argparse.Namespace, tokenizer, rank: int):
         display=display,
     )
 
-    _, dataset = dataset_manager.create_online_datasets()
+    _, dataset, _ = dataset_manager.create_online_datasets()
     logger.info(f"Dataset loaded: {len(dataset)} samples", extra={"rank": rank})
 
     return dataset
