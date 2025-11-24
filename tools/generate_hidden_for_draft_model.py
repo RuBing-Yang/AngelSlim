@@ -123,16 +123,19 @@ class HiddenStateGenerator:
         try:
             # Generate aux and target hiddens
             device = decide_device_for_distributed()
-            aux_hiddens, target_hiddens = self.target_model.get_aux_and_target_hiddens(
+            results = self.target_model.get_aux_and_target_hiddens(
                 input_ids=row["input_ids"].to(device),
             )
+            # hidden_states: B, N, 3*D
+            # target_hiddens: B, N, D
+            for k, v in results.items():
+                results[k] = v.cpu()
 
             # Prepare data point
             data_point = {
                 "input_ids": row["input_ids"].cpu(),  # B, N
                 "loss_mask": row["loss_mask"].cpu(),  # B, N
-                "hidden_states": aux_hiddens.cpu(),  # B, N, 3*D
-                "target_hiddens": target_hiddens.cpu(),  # B, N, D
+                **results,
             }
 
             # Save to disk
@@ -416,6 +419,7 @@ def main():
         torch_dtype = get_torch_dtype(args.torch_dtype)
         target_model = create_target_model(
             backend=args.target_backend,
+            modal_type=args.modal_type,
             model_path=args.target_model_name_or_path or args.model_name,
             torch_dtype=torch_dtype,
             trust_remote_code=args.trust_remote_code,

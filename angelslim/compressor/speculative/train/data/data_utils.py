@@ -116,7 +116,18 @@ def paddingtensor2D(intensors, N):
     return outtensors
 
 
-def paddingtensor3D(tensor_list):
+def paddingtensor3D_CBN(tensor_list):
+    N = max(tensor.shape[-1] for tensor in tensor_list)
+    out_tensor_list = []
+    for tensor in tensor_list:
+        c, b, n = tensor.shape
+        outtensor = torch.zeros(c, b, N, dtype=tensor_list[0].dtype)
+        outtensor[:, :, :n] = tensor
+        out_tensor_list.append(outtensor)
+    return torch.cat(out_tensor_list, dim=1)
+
+
+def paddingtensor3D_BHW(tensor_list):
     max_h = max(tensor.shape[-2] for tensor in tensor_list)
     max_w = max(tensor.shape[-1] for tensor in tensor_list)
     out_tensor_list = []
@@ -183,23 +194,44 @@ class VLMDataCollatorWithPadding:
             "input_ids": batch_input_ids,
             "attention_mask": batch_attention_mask,
             "loss_mask": batch_loss_mask,
+            "hidden_states": None,
+            "target_hiddens": None,
+            "inputs_embeds": None,
+            "position_ids": None,
         }
 
         if "pixel_values" in features[0]:
-            batch["pixel_values"] = paddingtensor3D(
+            batch["pixel_values"] = paddingtensor3D_BHW(
                 [item["pixel_values"] for item in features]
             )
         if "video_pixel_values" in features[0]:
-            batch["video_pixel_values"] = paddingtensor3D(
+            batch["video_pixel_values"] = paddingtensor3D_BHW(
                 [item["video_pixel_values"] for item in features]
             )
         if "image_grid_thw" in features[0]:
-            batch["image_grid_thw"] = paddingtensor3D(
+            batch["image_grid_thw"] = paddingtensor3D_BHW(
                 [item["image_grid_thw"] for item in features]
             )
         if "video_grid_thw" in features[0]:
-            batch["video_grid_thw"] = paddingtensor3D(
+            batch["video_grid_thw"] = paddingtensor3D_BHW(
                 [item["video_grid_thw"] for item in features]
+            )
+
+        # Check if both hidden_states and target_hiddens exist in all features
+        if all(
+            "hidden_states" in item and "target_hiddens" in item for item in features
+        ):
+            batch["hidden_states"] = torch.cat(
+                [paddingtensor(item["hidden_states"], max_length) for item in features]
+            )
+            batch["target_hiddens"] = torch.cat(
+                [paddingtensor(item["target_hiddens"], max_length) for item in features]
+            )
+            batch["inputs_embeds"] = torch.cat(
+                [paddingtensor(item["inputs_embeds"], max_length) for item in features]
+            )
+            batch["position_ids"] = paddingtensor3D_CBN(
+                [item["position_ids"] for item in features]
             )
 
         return batch

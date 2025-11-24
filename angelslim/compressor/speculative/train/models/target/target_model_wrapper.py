@@ -80,7 +80,7 @@ class BaseBackend(ABC):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Extract auxiliary and target hidden states from the model.
 
@@ -237,7 +237,7 @@ class TransformersBackend(BaseBackend):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Extract auxiliary and final layer hidden states.
 
@@ -266,7 +266,12 @@ class TransformersBackend(BaseBackend):
         # Get final layer hidden states
         target_hidden_states = outputs.hidden_states[-1]
 
-        return aux_hidden_states, target_hidden_states
+        # hidden_states: B, N, 3*D
+        # target_hiddens: B, N, D
+        return {
+            "hidden_states": aux_hidden_states,
+            "target_hiddens": target_hidden_states,
+        }
 
 
 class VLMForwardWrapper(torch.nn.Module):
@@ -375,7 +380,7 @@ class VLMTransformersBackend(BaseBackend):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Extract auxiliary and final layer hidden states.
 
@@ -387,13 +392,15 @@ class VLMTransformersBackend(BaseBackend):
         Returns:
             Tuple of (auxiliary_hidden_states, final_hidden_states)
         """
-        inputs_embeds_list = []
+        inputs_embeds_list, position_ids_list = [], []
 
         def hook(module, args, kwargs):
             if "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
                 inputs_embeds_list.append(
                     kwargs["inputs_embeds"].clone().detach().cpu()
                 )
+            if "position_ids" in kwargs and kwargs["position_ids"] is not None:
+                position_ids_list.append(kwargs["position_ids"].clone().detach().cpu())
             return args, kwargs
 
         handle = self.model.language_model.register_forward_pre_hook(
@@ -410,6 +417,7 @@ class VLMTransformersBackend(BaseBackend):
 
         handle.remove()
         inputs_embeds = inputs_embeds_list[0].to(input_ids.device)
+        position_ids = position_ids_list[0].to(input_ids.device)
 
         # Extract auxiliary hidden states
         aux_layer_ids = kwargs.get("aux_hidden_states_layer_ids", None)
@@ -420,7 +428,16 @@ class VLMTransformersBackend(BaseBackend):
         # Get final layer hidden states
         target_hidden_states = outputs.hidden_states[-1]
 
-        return aux_hidden_states, target_hidden_states, inputs_embeds
+        # hidden_states: B, N, 3*D
+        # target_hiddens: B, N, D
+        # inputs_embeds: B, N, D
+        # position_ids: 3, N
+        return {
+            "hidden_states": aux_hidden_states,
+            "target_hiddens": target_hidden_states,
+            "inputs_embeds": inputs_embeds,
+            "position_ids": position_ids,
+        }
 
 
 class TargetModelWrapper:
@@ -502,7 +519,7 @@ class TargetModelWrapper:
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Get auxiliary and target hidden states from model.
 

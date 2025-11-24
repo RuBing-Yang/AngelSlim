@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 import transformers
-from transformers import AutoTokenizer
+from transformers import AutoProcessor, AutoTokenizer
 
 from angelslim.compressor.speculative import (
     DatasetManager,
@@ -87,6 +87,12 @@ def parse_args():
         type=str,
         default="lm_head.weight",
         help="Key for lm head in model config",
+    )
+    model_group.add_argument(
+        "--sub_config_name",
+        type=str,
+        default=None,
+        help="Usually used for VLMs to specify sub-config name (e.g., 'text_config')",
     )
 
     # Data arguments
@@ -284,12 +290,16 @@ def train():
     target_head = TargetHead.from_pretrained(
         args.target_model_name_or_path,
         lm_head_key=args.lm_head_key,
+        sub_config_name=args.sub_config_name,
     )
     rank0_print("Target head loaded successfully")
 
     # Load tokenizer
     rank0_print("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(args.target_model_name_or_path)
+    if args.modal_type == "LLM":
+        tokenizer = AutoTokenizer.from_pretrained(args.target_model_name_or_path)
+    else:
+        tokenizer = AutoProcessor.from_pretrained(args.target_model_name_or_path)
 
     # Create all datasets using unified DatasetManager
     rank0_print("Creating datasets...")
