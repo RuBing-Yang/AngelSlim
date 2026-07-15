@@ -486,6 +486,20 @@ def main():
         enable_expert_parallel=False,
         max_num_seqs=args.batch_size,
         max_model_len=args.max_length + 16,
+
+        # For AMD HY3
+        gpu_memory_utilization=0.9,
+        block_size=16,
+        trust_remote_code=True,
+        hf_overrides={
+            "max_position_embeddings": 262144,
+        },
+        compilation_config={
+            "pass_config": {
+                "fuse_allreduce_rms": False,
+                "fuse_rope_norm_store_kv": True,
+            }
+        },
     )
 
     if args.skip_weight_loading:

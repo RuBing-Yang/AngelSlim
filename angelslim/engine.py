@@ -25,7 +25,6 @@ from .compressor import CompressorFactory
 from .compressor.speculative.benchmark import pytorch as pytorch_benchmark
 from .compressor.speculative.benchmark import vllm as vllm_benchmark
 from .data.dataloader import DataLoaderFactory
-from .models import SlimModelFactory
 from .utils import (
     default_compress_config,
     get_loaders,
@@ -100,6 +99,7 @@ class Engine:
         """
         assert model_name, "model_name must be specified."
         assert model_path, "model_path must be specified."
+        from .models import SlimModelFactory
 
         # Normalize device_map for DeepSpeed ZeRO / distributed training: YAML
         # configs often write ``None`` / ``"None"`` / ``"distributed"`` to
@@ -467,6 +467,9 @@ class InferEngine(Engine):
             cache_dir (str, optional): Directory to cache the model.
         """
         assert model_path, "model_path must be specified."
+
+        from .models import SlimModelFactory
+        
         # load slim config
         slim_config_path = os.path.join(model_path, "angelslim_config.json")
         if not os.path.exists(slim_config_path):
